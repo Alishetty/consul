@@ -4542,6 +4542,13 @@ func TestACLEndpoint_Login(t *testing.T) {
 		structs.BindingRuleBindTypeService,
 		"method-${serviceaccount.name}",
 	)
+
+	_, err = upsertTestBindingRule(
+		codec, "root", "dc1", method.Name,
+		"serviceaccount.namespace==default and serviceaccount.name==monolith",
+		structs.BindingRuleBindTypeService,
+		"method-${serviceaccount.name}",
+	)
 	_, err = upsertTestBindingRule(
 		codec, "root", "dc1", method.Name,
 		"serviceaccount.namespace==default and serviceaccount.name==monolith",
@@ -4607,7 +4614,7 @@ func TestACLEndpoint_Login(t *testing.T) {
 		requireErrorContains(t, acl.Login(&req, &resp), "Permission denied")
 	})
 
-	t.Run("valid method token 1 role binding must exist and does not exist", func(t *testing.T) {
+	t.Run("valid method token 1 service binding 1 role binding and role does not exist", func(t *testing.T) {
 		req := structs.ACLLoginRequest{
 			Auth: &structs.ACLLoginParams{
 				AuthMethod:  method.Name,
@@ -4618,7 +4625,16 @@ func TestACLEndpoint_Login(t *testing.T) {
 		}
 		resp := structs.ACLToken{}
 
-		require.Error(t, acl.Login(&req, &resp))
+		require.NoError(t, acl.Login(&req, &resp))
+
+		require.Equal(t, method.Name, resp.AuthMethod)
+		require.Equal(t, `token created via login: {"pod":"pod1"}`, resp.Description)
+		require.True(t, resp.Local)
+		require.Len(t, resp.ServiceIdentities, 1)
+		require.Len(t, resp.Roles, 0)
+		svcid := resp.ServiceIdentities[0]
+		require.Len(t, svcid.Datacenters, 0)
+		require.Equal(t, "method-monolith", svcid.ServiceName)
 	})
 
 	// create the role so that the bindtype=existing login works
@@ -4639,7 +4655,7 @@ func TestACLEndpoint_Login(t *testing.T) {
 	}
 	s1.purgeAuthMethodValidators()
 
-	t.Run("valid bearer token 1 role binding must exist and now exists", func(t *testing.T) {
+	t.Run("valid method token 1 service binding 1 role binding and role now exists", func(t *testing.T) {
 		req := structs.ACLLoginRequest{
 			Auth: &structs.ACLLoginParams{
 				AuthMethod:  method.Name,
@@ -4655,11 +4671,14 @@ func TestACLEndpoint_Login(t *testing.T) {
 		require.Equal(t, method.Name, resp.AuthMethod)
 		require.Equal(t, `token created via login: {"pod":"pod1"}`, resp.Description)
 		require.True(t, resp.Local)
-		require.Len(t, resp.ServiceIdentities, 0)
+		require.Len(t, resp.ServiceIdentities, 1)
 		require.Len(t, resp.Roles, 1)
 		role := resp.Roles[0]
 		require.Equal(t, monolithRoleID, role.ID)
 		require.Equal(t, "method-monolith", role.Name)
+		svcid := resp.ServiceIdentities[0]
+		require.Len(t, svcid.Datacenters, 0)
+		require.Equal(t, "method-monolith", svcid.ServiceName)
 	})
 
 	t.Run("valid bearer token 1 service binding", func(t *testing.T) {
